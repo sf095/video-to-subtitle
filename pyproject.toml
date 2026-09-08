@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video_to_subtitle"
+version = "0.1.0"
+description = "Transcribe video to subtitles with word-level timestamps using Whisper"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper>=1.0.0",
+    "gradio>=4.0.0",
+    "pandas>=1.0.0",
+    "tqdm>=4.66.0",
+]
+
+[project.scripts]
+video-to-sub = "video_to_subtitle.cli:main"

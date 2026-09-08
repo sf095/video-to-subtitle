@@ -1,0 +1,78 @@
+"""Unit tests for subtitle formatters and engine."""
+
+import json
+from video_to_subtitle.engine import SegmentTiming, WordTiming
+from video_to_subtitle.formatters import (
+    format_timestamp_srt,
+    format_timestamp_vtt,
+    format_timestamp_ass,
+    to_srt,
+    to_vtt,
+    to_ass_karaoke,
+    to_json,
+)
+
+
+def test_timestamp_formatting():
+    secs = 3661.234  # 1 hour, 1 minute, 1 second, 234 ms
+    assert format_timestamp_srt(secs) == "01:01:01,234", f"SRT failed: {format_timestamp_srt(secs)}"
+    assert format_timestamp_vtt(secs) == "01:01:01.234", f"VTT failed: {format_timestamp_vtt(secs)}"
+    assert format_timestamp_ass(secs) == "1:01:01.23", f"ASS failed: {format_timestamp_ass(secs)}"
+    print("✓ Timestamp formatting tests passed.")
+
+
+def test_formatters():
+    words = [
+        WordTiming(word=" Hello", start=0.5, end=0.9, probability=0.98),
+        WordTiming(word=" world", start=1.0, end=1.5, probability=0.99),
+    ]
+    seg = SegmentTiming(
+        id=0,
+        start=0.5,
+        end=1.5,
+        text="Hello world",
+        words=words,
+    )
+    segments = [seg]
+
+    # SRT
+    srt = to_srt(segments)
+    assert "Hello world" in srt
+    assert "00:00:00,500 --> 00:00:01,500" in srt
+    print("✓ Standard SRT test passed.")
+
+    # Word SRT
+    word_srt = to_srt(segments, word_level=True)
+    assert "Hello" in word_srt
+    assert "world" in word_srt
+    assert "00:00:00,500 --> 00:00:00,900" in word_srt
+    assert "00:00:01,000 --> 00:00:01,500" in word_srt
+    print("✓ Word-level SRT test passed.")
+
+    # VTT
+    vtt = to_vtt(segments)
+    assert vtt.startswith("WEBVTT")
+    assert "00:00:00.500 --> 00:00:01.500" in vtt
+    print("✓ WebVTT test passed.")
+
+    # ASS Karaoke
+    ass = to_ass_karaoke(segments)
+    assert "[Script Info]" in ass
+    assert "[V4+ Styles]" in ass
+    assert "KaraokeDefault" in ass
+    assert r"{\kf40} Hello" in ass or r"{\kf" in ass
+    print("✓ ASS Karaoke test passed.")
+
+    # JSON
+    j_str = to_json(segments, {"language": "en", "duration": 2.0})
+    data = json.loads(j_str)
+    assert data["metadata"]["language"] == "en"
+    assert len(data["segments"][0]["words"]) == 2
+    assert data["segments"][0]["words"][0]["word"] == " Hello"
+    print("✓ JSON test passed.")
+
+
+if __name__ == "__main__":
+    test_timestamp_formatting()
+    test_formatters()
+    print("\nAll unit tests passed successfully!")

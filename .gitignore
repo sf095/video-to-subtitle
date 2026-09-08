@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Temporary media & subtitles
+*.wav
+*.aiff
+*.zip
+subtitles_*/
+whisper_audio_*/
+.DS_Store
