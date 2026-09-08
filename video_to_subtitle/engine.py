@@ -86,6 +86,16 @@ def extract_audio(video_path: str, output_audio_path: Optional[str] = None) -> s
     return output_audio_path
 
 
+def is_model_cached(model_size: str) -> bool:
+    """Check if the specified Whisper model is already downloaded locally."""
+    try:
+        from faster_whisper.utils import download_model
+        download_model(model_size, local_files_only=True)
+        return True
+    except Exception:
+        return False
+
+
 def get_whisper_model(
     model_size: str = "medium",
     device: str = "auto",
@@ -94,11 +104,20 @@ def get_whisper_model(
     """Load or retrieve a cached WhisperModel instance."""
     cache_key = f"{model_size}_{device}_{compute_type}"
     if cache_key not in _CACHED_MODELS:
-        _CACHED_MODELS[cache_key] = WhisperModel(
-            model_size,
-            device=device,
-            compute_type=compute_type,
-        )
+        try:
+            _CACHED_MODELS[cache_key] = WhisperModel(
+                model_size,
+                device=device,
+                compute_type=compute_type,
+            )
+        except Exception as e:
+            err_msg = str(e)
+            if "LocalEntryNotFoundError" in type(e).__name__ or "Cannot find the requested files" in err_msg or "offline" in err_msg.lower():
+                raise RuntimeError(
+                    f"Whisper model '{model_size}' is not downloaded locally, and downloading failed (offline or network error). "
+                    f"Please connect to the internet to download it on first use."
+                ) from e
+            raise
     return _CACHED_MODELS[cache_key]
 
 
@@ -132,8 +151,12 @@ def transcribe(
     audio_path = extract_audio(media_path)
 
     try:
+        is_cached = is_model_cached(model_size)
         if progress_callback:
-            progress_callback(0.2, f"Loading Whisper model '{model_size}'...")
+            if is_cached:
+                progress_callback(0.2, f"Loading cached Whisper model '{model_size}'...")
+            else:
+                progress_callback(0.2, f"Downloading Whisper model '{model_size}' from HuggingFace (first time only)...")
 
         model = get_whisper_model(model_size, device=device, compute_type=compute_type)
 
