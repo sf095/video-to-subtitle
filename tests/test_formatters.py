@@ -63,6 +63,21 @@ def test_formatters():
     assert r"{\kf40} Hello" in ass or r"{\kf" in ass
     print("✓ ASS Karaoke test passed.")
 
+    # ASS Karaoke Custom Styling
+    custom_ass = to_ass_karaoke(
+        segments,
+        font_name="Helvetica",
+        font_size=32,
+        primary_color="&H00FFFF00",
+        secondary_color="&H00FF00FF",
+        bold=False,
+    )
+    assert "Helvetica" in custom_ass
+    assert "32" in custom_ass
+    assert "&H00FFFF00" in custom_ass
+    assert "&H00FF00FF" in custom_ass
+    print("✓ ASS Karaoke Custom Styling test passed.")
+
     # JSON
     j_str = to_json(segments, {"language": "en", "duration": 2.0})
     data = json.loads(j_str)
@@ -72,7 +87,17 @@ def test_formatters():
     print("✓ JSON test passed.")
 
 
+def test_build_app():
+    from app import build_app, get_model_choices
+    demo = build_app()
+    assert demo is not None
+    choices = get_model_choices()
+    assert len(choices) >= 5
+    print("✓ App initialization and model choices test passed.")
+
+
 if __name__ == "__main__":
     test_timestamp_formatting()
     test_formatters()
+    test_build_app()
     print("\nAll unit tests passed successfully!")

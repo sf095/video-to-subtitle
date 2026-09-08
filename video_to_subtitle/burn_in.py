@@ -75,11 +75,14 @@ def burn_subtitles(
     video_path: str,
     subtitle_path: str,
     output_video_path: Optional[str] = None,
+    prefer_mode: str = "auto",
 ) -> Tuple[str, str]:
     """
     Burn subtitles into video using ffmpeg.
-    If the host ffmpeg supports libass/subtitles, hardcodes them.
-    Otherwise, gracefully embeds subtitles as a standard playable subtitle track (mov_text).
+    Modes:
+        - 'auto': Use hardcode if ffmpeg filter is supported, else fallback to soft embedded.
+        - 'softcode': Directly embed subtitle as a standard selectable track (fast & lossless).
+        - 'hardcode': Require hardcoded burn-in (raises RuntimeError if ffmpeg lacks libass).
 
     Returns:
         Tuple of (output_video_path, mode_used: 'hardcoded' or 'embedded')
@@ -93,6 +96,10 @@ def burn_subtitles(
     if output_video_path is None:
         base, _ = os.path.splitext(video_path)
         output_video_path = f"{base}_subtitled.mp4"
+
+    if prefer_mode == "softcode":
+        embed_soft_subtitles(video_path, subtitle_path, output_video_path)
+        return output_video_path, "embedded"
 
     has_ass = supports_filter("ass")
     has_sub = supports_filter("subtitles")
@@ -115,6 +122,14 @@ def burn_subtitles(
         proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if proc.returncode == 0:
             return output_video_path, "hardcoded"
+        if prefer_mode == "hardcode":
+            raise RuntimeError(f"ffmpeg subtitle burning failed: {proc.stderr}")
+
+    if prefer_mode == "hardcode":
+        raise RuntimeError(
+            "Your ffmpeg build does not support the 'ass' or 'subtitles' filter required for pixel hardcoding. "
+            "Please install ffmpeg with libass (e.g. `brew install ffmpeg`) or select 'Lossless Soft Track'."
+        )
 
     # Fallback to lossless container embedding (mov_text)
     embed_soft_subtitles(video_path, subtitle_path, output_video_path)

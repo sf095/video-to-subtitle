@@ -128,6 +128,7 @@ def transcribe(
     compute_type: str = "default",
     language: Optional[str] = None,
     vad_filter: bool = True,
+    initial_prompt: Optional[str] = None,
     progress_callback: Optional[Callable[[float, str], None]] = None,
 ) -> Tuple[List[SegmentTiming], dict]:
     """
@@ -140,6 +141,7 @@ def transcribe(
         compute_type: Quantization / compute type ('default', 'int8', 'float16').
         language: Language code (e.g., 'en', 'vi', 'es') or None for auto-detection.
         vad_filter: Whether to apply Silero VAD to suppress silence hallucinations.
+        initial_prompt: Optional prompt to provide vocabulary context, acronyms, or proper nouns.
         progress_callback: Optional callback receiving (progress_ratio, status_message).
 
     Returns:
@@ -169,6 +171,7 @@ def transcribe(
             language=language,
             vad_filter=vad_filter,
             vad_parameters=dict(min_silence_duration_ms=500),
+            initial_prompt=initial_prompt,
         )
 
         total_duration = info.duration if info.duration and info.duration > 0 else 1.0

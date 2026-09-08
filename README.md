@@ -21,9 +21,9 @@ A modern, local, privacy-first application that transcribes videos to subtitle f
   - **JSON (`.json`)**: Machine-readable structured data containing words, timestamps, and probabilities.
   - **ZIP Archive (`.zip`)**: One-click download containing all formats.
 - **🖥️ Dual Mode:**
-  - **Web Studio (Gradio)**: Interactive UI with video player, word transcript table, and burnt-in preview.
+  - **Web Studio (Gradio)**: Modern 2-column layout with metrics dashboard (WPM speaking rate, language confidence, duration), 1-click sample demo, copyable full transcripts, live subtitle code inspector, and dedicated burn-in studio with custom styling presets.
   - **Command-Line (CLI)**: Automate batch video processing directly from the terminal.
-- **🔥 Video Subtitle Burn-In:** Hardcode karaoke animated subtitles directly onto video using `ffmpeg`.
+- **🎨 Custom Subtitle Styling & Burn-In:** Choose font families, font sizes, and animated karaoke highlight color schemes (Classic Gold, Cyber Neon, Modern Emerald, Warm Sunset, Minimalist Clean) with automatic libass detection and lossless soft track fallback.
 
 ---
 
