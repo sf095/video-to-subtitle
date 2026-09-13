@@ -1,6 +1,9 @@
-"""Unit tests for subtitle formatters and engine."""
-
 import json
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from video_to_subtitle.engine import SegmentTiming, WordTiming
 from video_to_subtitle.formatters import (
     format_timestamp_srt,
