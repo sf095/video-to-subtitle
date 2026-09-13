@@ -244,3 +244,17 @@ def export_all_formats(
     paths["json"] = json_path
 
     return paths
+
+
+def resolve_output_directory(video_path: str, custom_output_dir: Optional[str] = None) -> str:
+    """
+    Resolve the destination directory for subtitle files.
+    Defaults to the same folder containing the input video.
+    """
+    if custom_output_dir and custom_output_dir.strip():
+        out_dir = os.path.abspath(custom_output_dir.strip())
+    else:
+        out_dir = os.path.dirname(os.path.abspath(video_path))
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir
+

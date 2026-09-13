@@ -18,6 +18,7 @@ from video_to_subtitle.engine import (
 )
 from video_to_subtitle.formatters import (
     export_all_formats,
+    resolve_output_directory,
     to_ass_karaoke,
     to_json,
     to_srt,
@@ -155,15 +156,31 @@ def render_empty_state() -> str:
     """
 
 
-def render_metrics_dashboard(info: dict, segments_count: int, words_count: int) -> str:
-    """Render high-contrast metric chips summarizing the transcription."""
+def render_metrics_dashboard(
+    info: dict,
+    segments_count: int,
+    words_count: int,
+    out_dir: Optional[str] = None,
+) -> str:
+    """Render high-contrast metric chips summarizing the transcription and output folder."""
     lang = html.escape(str(info.get("language", "Unknown")).upper())
     lang_prob = info.get("language_probability", 1.0) * 100
     duration = info.get("duration", 0.0)
     wpm = int(round((words_count / (duration / 60)))) if duration > 0 else 0
     model = html.escape(str(info.get("model_size", "whisper")))
 
+    saved_banner = ""
+    if out_dir:
+        escaped_dir = html.escape(str(out_dir))
+        saved_banner = f"""
+        <div style="padding: 0.6rem 0.9rem; margin-bottom: 0.85rem; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; font-size: 0.85rem; color: #065f46; display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.1rem;">📁</span>
+            <div><b>Subtitles saved to video folder:</b> <code style="background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px;">{escaped_dir}</code></div>
+        </div>
+        """
+
     return f"""
+    {saved_banner}
     <div class="metric-grid">
         <div class="metric-card">
             <div class="metric-label">Language</div>
@@ -195,17 +212,28 @@ def render_metrics_dashboard(info: dict, segments_count: int, words_count: int) 
 
 
 def run_transcription(
-    video_path: Optional[str],
-    model_size: str,
-    compute_type: str,
-    language_choice: str,
-    custom_language: str,
-    vad_filter: bool,
-    initial_prompt: Optional[str],
+    video_path: Optional[str] = None,
+    local_video_path: Optional[str] = None,
+    custom_output_dir: Optional[str] = None,
+    model_size: str = "medium",
+    compute_type: str = "default",
+    language_choice: str = "auto",
+    custom_language: str = "",
+    vad_filter: bool = True,
+    initial_prompt: Optional[str] = None,
     progress=gr.Progress(track_tqdm=True),
 ):
-    if not video_path or not os.path.exists(video_path):
-        raise gr.Error("Please upload or provide a valid video or audio file.")
+    effective_video = None
+    if local_video_path and str(local_video_path).strip():
+        candidate = os.path.abspath(str(local_video_path).strip())
+        if not os.path.exists(candidate):
+            raise gr.Error(f"Local video file not found: {candidate}")
+        effective_video = candidate
+    elif video_path and os.path.exists(video_path):
+        effective_video = video_path
+
+    if not effective_video:
+        raise gr.Error("Please upload a media file or enter a valid local video path.")
 
     # Determine language parameter
     if language_choice == "custom":
@@ -224,7 +252,7 @@ def run_transcription(
 
     try:
         segments, info = transcribe(
-            video_path,
+            effective_video,
             model_size=model_size,
             device="auto",
             compute_type=compute_type,
@@ -236,9 +264,9 @@ def run_transcription(
     except Exception as e:
         raise gr.Error(f"Transcription failed: {str(e)}")
 
-    # Prepare export files in a temporary session directory
-    base_name = os.path.splitext(os.path.basename(video_path))[0]
-    out_dir = tempfile.mkdtemp(prefix="subtitles_")
+    # Prepare export files in output directory (defaults to input video folder)
+    base_name = os.path.splitext(os.path.basename(effective_video))[0]
+    out_dir = resolve_output_directory(effective_video, custom_output_dir)
     paths = export_all_formats(segments, info, out_dir, base_name)
 
     # Create zip bundle
@@ -310,7 +338,7 @@ def run_transcription(
             )
 
     word_df = pd.DataFrame(word_rows)
-    metrics_html = render_metrics_dashboard(info, len(segments), total_words)
+    metrics_html = render_metrics_dashboard(info, len(segments), total_words, out_dir=out_dir)
 
     # Default code inspector view: Standard SRT
     default_code, default_lang = raw_texts.get(
@@ -318,7 +346,7 @@ def run_transcription(
     )
 
     state_data = {
-        "video_path": video_path,
+        "video_path": effective_video,
         "segments": [seg.to_dict() for seg in segments],
         "info": info,
         "paths": paths,
@@ -329,7 +357,7 @@ def run_transcription(
     }
 
     burn_ready_status = (
-        "💡 **Subtitles ready!** Select your desired karaoke style and font size below, "
+        f"💡 **Subtitles ready & saved to `{out_dir}`!** Select your desired karaoke style and font size below, "
         "then click **Generate Subtitled Video**."
     )
 
@@ -370,7 +398,8 @@ def run_burn_in(
     burn_mode: str,
     progress=gr.Progress(track_tqdm=True),
 ):
-    if not video_path or not os.path.exists(video_path):
+    actual_video = (state_data.get("video_path") if state_data else None) or video_path
+    if not actual_video or not os.path.exists(actual_video):
         raise gr.Error("Please upload or provide a valid video file first.")
     if not state_data or "segments" not in state_data:
         raise gr.Error("Please run transcription first before burning subtitles.")
@@ -394,8 +423,8 @@ def run_burn_in(
 
     # Retrieve style parameters
     preset = STYLE_PRESETS.get(style_preset, STYLE_PRESETS["Classic Gold"])
-    out_dir = state_data.get("out_dir") or tempfile.mkdtemp(prefix="subtitles_")
-    base_name = state_data.get("base_name", "output")
+    out_dir = (state_data.get("out_dir") if state_data else None) or resolve_output_directory(actual_video)
+    base_name = (state_data.get("base_name") if state_data else None) or os.path.splitext(os.path.basename(actual_video))[0]
 
     # Generate custom ASS file
     custom_ass_content = to_ass_karaoke(
@@ -432,7 +461,7 @@ def run_burn_in(
 
     try:
         output_video, mode_used = burn_subtitles(
-            video_path,
+            actual_video,
             custom_ass_path,
             burned_output,
             prefer_mode=prefer_mode,
@@ -462,6 +491,8 @@ def clear_all_inputs():
     """Reset all state and outputs to initial empty state."""
     return (
         None,  # input_video
+        "",  # local_video_input
+        "",  # output_dir_input
         render_empty_state(),  # summary_output
         "",  # full_transcript_text
         pd.DataFrame(columns=["#", "Start", "End", "Duration", "Dialogue"]),  # segment_df
@@ -676,8 +707,14 @@ def build_app():
             # Left Column: Input & Configuration
             with gr.Column(scale=5):
                 input_video = gr.Video(
-                    label="Media Input (Video or Audio)",
+                    label="Media Input (Upload Video or Audio)",
                     sources=["upload"],
+                )
+                local_video_input = gr.Textbox(
+                    label="Or Local Video/Audio File Path",
+                    placeholder="e.g. /Users/name/Videos/clip.mp4",
+                    info="Direct path on this machine. Subtitles (.srt) will be saved directly into its folder.",
+                    lines=1,
                 )
 
                 clear_btn = gr.Button(
@@ -734,6 +771,12 @@ def build_app():
                             label="Vocabulary & Terminology Hint (Initial Prompt)",
                             placeholder="e.g. AcmeCorp, GraphQL, Dr. Nguyen, TypeScript",
                             info="Guide Whisper on domain-specific proper nouns, jargon, or acronyms.",
+                        )
+                        output_dir_input = gr.Textbox(
+                            label="Custom Output Folder (Optional)",
+                            placeholder="Defaults to the same folder as the input video",
+                            info="Leave blank to automatically save .srt files into the input video folder.",
+                            lines=1,
                         )
 
                 transcribe_btn = gr.Button(
@@ -898,6 +941,8 @@ def build_app():
             inputs=[],
             outputs=[
                 input_video,
+                local_video_input,
+                output_dir_input,
                 summary_output,
                 full_transcript_box,
                 segment_table,
@@ -920,6 +965,8 @@ def build_app():
             fn=run_transcription,
             inputs=[
                 input_video,
+                local_video_input,
+                output_dir_input,
                 model_dropdown,
                 compute_dropdown,
                 language_dropdown,

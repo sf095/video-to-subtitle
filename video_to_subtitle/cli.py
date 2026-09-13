@@ -7,6 +7,7 @@ from video_to_subtitle.burn_in import burn_subtitles
 from video_to_subtitle.engine import transcribe
 from video_to_subtitle.formatters import (
     export_all_formats,
+    resolve_output_directory,
     to_ass_karaoke,
     to_json,
     to_srt,
@@ -75,9 +76,8 @@ def main():
         print(f"Error: Video file not found: {args.video}", file=sys.stderr)
         sys.exit(1)
 
-    video_dir = os.path.dirname(os.path.abspath(args.video))
     base_name = os.path.splitext(os.path.basename(args.video))[0]
-    out_dir = os.path.abspath(args.output_dir) if args.output_dir else video_dir
+    out_dir = resolve_output_directory(args.video, args.output_dir)
 
     print(f"🎬 Processing video: {args.video}")
     print(f"⚙️  Model: {args.model} | Device: {args.device} | Format: {args.format}")
