@@ -38,6 +38,18 @@ def test_resolve_output_directory_custom_override():
         assert os.path.isdir(resolved)
 
 
+def test_resolve_output_directory_gradio_cache_fallback():
+    """Test that videos in Gradio temporary cache fall back to ~/Downloads or fallback_dir."""
+    fake_gradio_video = "/private/var/folders/37/2x/T/gradio/7a8b9c/uploaded_clip.mp4"
+    with tempfile.TemporaryDirectory() as custom_fallback:
+        resolved = resolve_output_directory(fake_gradio_video, fallback_dir=custom_fallback)
+        assert resolved == os.path.abspath(custom_fallback)
+
+    # Test default fallback to ~/Downloads
+    resolved_default = resolve_output_directory(fake_gradio_video)
+    assert resolved_default == os.path.expanduser("~/Downloads")
+
+
 def test_srt_file_written_to_video_directory():
     """Test standard and word-level SRT files are created in video folder."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -104,8 +116,8 @@ def test_cli_outputs_to_video_directory(monkeypatch=None):
             assert "Welcome to the video" in f.read()
 
 
-def test_app_transcription_local_path():
-    """Test app.py run_transcription writes SRT to local video folder."""
+def test_app_transcription_does_not_auto_save_to_video_directory():
+    """Test app.py run_transcription stages files in temp dir and does NOT auto-save to video folder."""
     from unittest.mock import patch
     from app import run_transcription, clear_all_inputs
 
@@ -141,25 +153,104 @@ def test_app_transcription_local_path():
                 progress=lambda p, desc="": None,
             )
 
-        # Expected output files
-        expected_srt = os.path.join(video_dir, "lesson1.srt")
-        expected_word_srt = os.path.join(video_dir, "lesson1.word.srt")
-
-        assert os.path.exists(expected_srt), f"Expected {expected_srt} to be created in video directory"
-        assert os.path.exists(expected_word_srt), f"Expected {expected_word_srt} to be created in video directory"
-
-        with open(expected_srt, "r", encoding="utf-8") as f:
-            content = f.read()
-            assert "In this lesson we learn" in content
+        # Video directory should NOT have been polluted with subtitles
+        video_folder_srt = os.path.join(video_dir, "lesson1.srt")
+        video_folder_word_srt = os.path.join(video_dir, "lesson1.word.srt")
+        assert not os.path.exists(video_folder_srt), "Expected NO srt file in video directory"
+        assert not os.path.exists(video_folder_word_srt), "Expected NO word.srt file in video directory"
 
         # Check state_data returned (last element of results)
         state_data = results[-1]
-        assert state_data["out_dir"] == video_dir
-        assert state_data["video_path"] == os.path.abspath(video_file)
+        assert state_data["is_custom_save"] is False
+        staging_dir = state_data["out_dir"]
+        assert os.path.exists(os.path.join(staging_dir, "lesson1.srt")), "Files must exist in staging for download"
+        assert os.path.exists(os.path.join(staging_dir, "lesson1_subtitles.zip"))
 
-        # Test clear_all_inputs matches expected outputs count (17 elements)
+        # Test clear_all_inputs matches expected outputs count (19 elements)
         cleared = clear_all_inputs()
-        assert len(cleared) == 17
+        assert len(cleared) == 19
+
+
+def test_app_transcription_does_not_auto_save_to_downloads():
+    """Test app.py run_transcription does NOT save browser upload to ~/Downloads."""
+    from unittest.mock import patch
+    from app import run_transcription
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        gradio_cache_dir = os.path.join(temp_dir, "gradio", "uploads")
+        os.makedirs(gradio_cache_dir, exist_ok=True)
+        video_file = os.path.join(gradio_cache_dir, "upload_test.mp4")
+        with open(video_file, "w") as f:
+            f.write("mock video bytes")
+
+        mock_segments = [
+            SegmentTiming(
+                id=0,
+                start=0.0,
+                end=1.0,
+                text="Upload test subtitle",
+                words=[],
+            )
+        ]
+        mock_info = {"language": "en", "duration": 1.0, "model_size": "medium"}
+
+        with patch("app.transcribe", return_value=(mock_segments, mock_info)):
+            results = run_transcription(
+                video_path=video_file,
+                local_video_path=None,
+                custom_output_dir=None,
+                model_size="medium",
+                compute_type="default",
+                language_choice="auto",
+                custom_language="",
+                vad_filter=True,
+                initial_prompt=None,
+                progress=lambda p, desc="": None,
+            )
+
+        state_data = results[-1]
+        downloads_dir = os.path.abspath(os.path.expanduser("~/Downloads"))
+        # Ensure ~/Downloads was NOT written to
+        assert not os.path.exists(os.path.join(downloads_dir, "upload_test.srt"))
+        assert state_data["is_custom_save"] is False
+        assert state_data["out_dir"] != downloads_dir
+        # Ensure staging files exist for download button
+        assert os.path.exists(os.path.join(state_data["out_dir"], "upload_test.srt"))
+
+
+def test_app_transcription_custom_output_dir_respected():
+    """Test app.py run_transcription respects explicit custom output folder when provided."""
+    from unittest.mock import patch
+    from app import run_transcription
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        video_file = os.path.join(temp_dir, "input.mp4")
+        with open(video_file, "w") as f:
+            f.write("video data")
+        custom_out = os.path.join(temp_dir, "my_custom_subs")
+
+        mock_segments = [SegmentTiming(id=0, start=0.0, end=1.0, text="Hi", words=[])]
+        mock_info = {"language": "en", "duration": 1.0}
+
+        with patch("app.transcribe", return_value=(mock_segments, mock_info)):
+            results = run_transcription(
+                video_path=video_file,
+                local_video_path=None,
+                custom_output_dir=custom_out,
+                model_size="medium",
+                compute_type="default",
+                language_choice="auto",
+                custom_language="",
+                vad_filter=True,
+                initial_prompt=None,
+                progress=lambda p, desc="": None,
+            )
+
+        state_data = results[-1]
+        assert state_data["is_custom_save"] is True
+        assert state_data["out_dir"] == os.path.abspath(custom_out)
+        assert os.path.exists(os.path.join(custom_out, "input.srt"))
+
 
 
 if __name__ == "__main__":
@@ -169,9 +260,11 @@ if __name__ == "__main__":
     print("✓ test_resolve_output_directory_custom_override passed.")
     test_srt_file_written_to_video_directory()
     print("✓ test_srt_file_written_to_video_directory passed.")
-    test_cli_outputs_to_video_directory()
-    print("✓ test_cli_outputs_to_video_directory passed.")
-    test_app_transcription_local_path()
-    print("✓ test_app_transcription_local_path passed.")
+    test_app_transcription_does_not_auto_save_to_video_directory()
+    print("✓ test_app_transcription_does_not_auto_save_to_video_directory passed.")
+    test_app_transcription_does_not_auto_save_to_downloads()
+    print("✓ test_app_transcription_does_not_auto_save_to_downloads passed.")
+    test_app_transcription_custom_output_dir_respected()
+    print("✓ test_app_transcription_custom_output_dir_respected passed.")
     print("All output path tests passed!")
 

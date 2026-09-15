@@ -246,15 +246,28 @@ def export_all_formats(
     return paths
 
 
-def resolve_output_directory(video_path: str, custom_output_dir: Optional[str] = None) -> str:
+from video_to_subtitle.platform_utils import is_gradio_temp_path
+
+
+def resolve_output_directory(
+    video_path: str,
+    custom_output_dir: Optional[str] = None,
+    fallback_dir: Optional[str] = None,
+) -> str:
     """
     Resolve the destination directory for subtitle files.
-    Defaults to the same folder containing the input video.
+    - If custom_output_dir is provided: use it.
+    - If video_path is in Gradio temporary cache: fallback to fallback_dir or ~/Downloads.
+    - Otherwise: defaults to the same folder containing the input video.
     """
-    if custom_output_dir and custom_output_dir.strip():
-        out_dir = os.path.abspath(custom_output_dir.strip())
+    if custom_output_dir and str(custom_output_dir).strip():
+        out_dir = os.path.abspath(str(custom_output_dir).strip())
+    elif is_gradio_temp_path(video_path):
+        fallback = fallback_dir or os.path.expanduser("~/Downloads")
+        out_dir = os.path.abspath(fallback)
     else:
         out_dir = os.path.dirname(os.path.abspath(video_path))
     os.makedirs(out_dir, exist_ok=True)
     return out_dir
+
 
