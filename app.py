@@ -24,6 +24,15 @@ from video_to_subtitle.formatters import (
     to_srt,
     to_vtt,
 )
+from video_to_subtitle.cache_manager import (
+    clear_model_cache,
+    clear_temp_cache,
+    get_model_cache_stats,
+    get_temp_cache_stats,
+    register_exit_cleanup,
+    register_session_temp_dir,
+)
+
 
 
 # Preset color & typography schemes for ASS Karaoke subtitles
@@ -107,6 +116,37 @@ def get_model_choices() -> List[Tuple[str, str]]:
         else:
             display_label = label
         choices.append((display_label, model_id))
+    return choices
+
+
+def render_storage_info() -> str:
+    """Render markdown summary of current cache & storage usage."""
+    temp_stats = get_temp_cache_stats()
+    model_stats = get_model_cache_stats()
+
+    models_list = []
+    if model_stats["models"]:
+        for m in model_stats["models"]:
+            models_list.append(f"- **`{m['model_size']}`**: {m['formatted_size']}")
+        models_str = "\n".join(models_list)
+    else:
+        models_str = "- *No models downloaded locally.*"
+
+    return f"""### 💾 Local Storage & Cache Usage
+- **📁 Temporary Files**: `{temp_stats['formatted_size']}` ({temp_stats['file_count']} files in upload & export cache)
+- **🧠 Downloaded Whisper Models**: `{model_stats['formatted_total']}`
+{models_str}
+"""
+
+
+def get_downloaded_model_choices() -> List[Tuple[str, str]]:
+    """Return dropdown choices for downloaded Whisper models available for deletion."""
+    model_stats = get_model_cache_stats()
+    if not model_stats["models"]:
+        return [("No models downloaded", "none")]
+    choices = [("All Downloaded Models", "all")]
+    for m in model_stats["models"]:
+        choices.append((f"{m['model_size']} ({m['formatted_size']})", m["model_size"]))
     return choices
 
 
@@ -275,6 +315,7 @@ def run_transcription(
         is_custom_save = True
     else:
         out_dir = tempfile.mkdtemp(prefix="subtitles_export_")
+        register_session_temp_dir(out_dir)
         is_custom_save = False
 
     paths = export_all_formats(segments, info, out_dir, base_name)
@@ -445,6 +486,7 @@ def run_burn_in(
     out_dir = (state_data.get("out_dir") if state_data else None) or tempfile.mkdtemp(
         prefix="subtitles_burn_"
     )
+    register_session_temp_dir(out_dir)
     base_name = (state_data.get("base_name") if state_data else None) or os.path.splitext(os.path.basename(actual_video))[0]
 
     # Generate custom ASS file
@@ -802,6 +844,23 @@ def build_app():
                     size="lg",
                 )
 
+                # Storage & Cache Management Accordion
+                with gr.Accordion("🧹 Storage & Cache Management", open=False):
+                    storage_info_md = gr.Markdown(value=render_storage_info())
+                    with gr.Row():
+                        clear_temp_btn = gr.Button("🗑️ Clear Temp Files", variant="secondary", size="sm")
+                        refresh_storage_btn = gr.Button("🔄 Refresh Stats", variant="ghost", size="sm")
+                    with gr.Row():
+                        downloaded_choices = get_downloaded_model_choices()
+                        model_delete_dropdown = gr.Dropdown(
+                            choices=downloaded_choices,
+                            value=downloaded_choices[0][1] if downloaded_choices else "none",
+                            label="Model Weights to Delete",
+                            scale=2,
+                        )
+                        delete_model_btn = gr.Button("⚠️ Delete Model", variant="stop", size="sm", scale=1)
+                    cache_status_md = gr.Markdown(value="")
+
             # Right Column: Results, Inspector & Export
             with gr.Column(scale=7):
                 summary_output = gr.HTML(value=render_empty_state())
@@ -1027,6 +1086,58 @@ def build_app():
             outputs=[burned_video_player, burn_status_msg],
         )
 
+        # Event: Storage & Cache Handlers
+        def on_clear_temp():
+            result = clear_temp_cache()
+            new_storage_info = render_storage_info()
+            status_msg = f"✅ Cleared {result['formatted_freed']} of temporary files ({result['files_removed']} files removed)."
+            return new_storage_info, status_msg
+
+        def on_delete_model(selected_model):
+            if not selected_model or selected_model == "none":
+                return render_storage_info(), gr.Dropdown(), gr.Dropdown(), "⚠️ No downloaded model selected to delete."
+            result = clear_model_cache(selected_model)
+            new_storage_info = render_storage_info()
+            new_delete_choices = get_downloaded_model_choices()
+            new_delete_val = new_delete_choices[0][1] if new_delete_choices else "none"
+            new_model_choices = get_model_choices()
+            status_msg = f"✅ Deleted Whisper model weights: {', '.join(result['removed_models'])} ({result['formatted_freed']} freed)."
+            return (
+                new_storage_info,
+                gr.Dropdown(choices=new_delete_choices, value=new_delete_val),
+                gr.Dropdown(choices=new_model_choices),
+                status_msg,
+            )
+
+        def on_refresh_storage():
+            new_storage_info = render_storage_info()
+            new_delete_choices = get_downloaded_model_choices()
+            new_delete_val = new_delete_choices[0][1] if new_delete_choices else "none"
+            new_model_choices = get_model_choices()
+            return (
+                new_storage_info,
+                gr.Dropdown(choices=new_delete_choices, value=new_delete_val),
+                gr.Dropdown(choices=new_model_choices),
+                "🔄 Storage statistics refreshed.",
+            )
+
+        clear_temp_btn.click(
+            fn=on_clear_temp,
+            outputs=[storage_info_md, cache_status_md],
+        )
+
+        delete_model_btn.click(
+            fn=on_delete_model,
+            inputs=[model_delete_dropdown],
+            outputs=[storage_info_md, model_delete_dropdown, model_dropdown, cache_status_md],
+        )
+
+        refresh_storage_btn.click(
+            fn=on_refresh_storage,
+            outputs=[storage_info_md, model_delete_dropdown, model_dropdown, cache_status_md],
+        )
+
+    register_exit_cleanup()
     return demo
 
 

@@ -99,6 +99,7 @@ video_to_subtitle/
 │   ├── engine.py              # faster-whisper core & audio extraction
 │   ├── formatters.py          # SRT, VTT, Karaoke ASS, JSON generators
 │   ├── burn_in.py             # ffmpeg subtitle video burning
+│   ├── cache_manager.py       # Temporary storage & model cache management
 │   └── cli.py                 # Command-line interface
 └── docs/
     └── ideas/

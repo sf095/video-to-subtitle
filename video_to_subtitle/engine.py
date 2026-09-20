@@ -121,6 +121,33 @@ def get_whisper_model(
     return _CACHED_MODELS[cache_key]
 
 
+def evict_model_from_cache(model_size: Optional[str] = None) -> int:
+    """
+    Evict loaded WhisperModel instances from in-memory cache and run garbage collection.
+    
+    Args:
+        model_size: Specific model size to evict (e.g. 'medium'), or None to evict all.
+        
+    Returns:
+        Number of evicted model instances.
+    """
+    import gc
+    global _CACHED_MODELS
+    evicted = 0
+    if model_size is None:
+        evicted = len(_CACHED_MODELS)
+        _CACHED_MODELS.clear()
+    else:
+        prefix = f"{model_size}_"
+        keys_to_remove = [k for k in _CACHED_MODELS if k.startswith(prefix)]
+        for k in keys_to_remove:
+            del _CACHED_MODELS[k]
+            evicted += 1
+    gc.collect()
+    return evicted
+
+
+
 def transcribe(
     media_path: str,
     model_size: str = "medium",
