@@ -24,12 +24,6 @@ from video_to_subtitle.formatters import (
     to_srt,
     to_vtt,
 )
-from video_to_subtitle.platform_utils import (
-    is_gradio_temp_path,
-    pick_local_file,
-    pick_local_folder,
-    reveal_in_file_manager,
-)
 
 
 # Preset color & typography schemes for ASS Karaoke subtitles
@@ -220,7 +214,6 @@ def render_metrics_dashboard(
 
 def run_transcription(
     video_path: Optional[str] = None,
-    local_video_path: Optional[str] = None,
     custom_output_dir: Optional[str] = None,
     model_size: str = "medium",
     compute_type: str = "default",
@@ -229,18 +222,19 @@ def run_transcription(
     vad_filter: bool = True,
     initial_prompt: Optional[str] = None,
     progress=gr.Progress(track_tqdm=True),
+    local_video_path: Optional[str] = None,
 ):
     effective_video = None
-    if local_video_path and str(local_video_path).strip():
+    if video_path and os.path.exists(video_path):
+        effective_video = video_path
+    elif local_video_path and str(local_video_path).strip():
         candidate = os.path.abspath(str(local_video_path).strip())
         if not os.path.exists(candidate):
             raise gr.Error(f"Local video file not found: {candidate}")
         effective_video = candidate
-    elif video_path and os.path.exists(video_path):
-        effective_video = video_path
 
     if not effective_video:
-        raise gr.Error("Please upload a media file or enter a valid local video path.")
+        raise gr.Error("Please upload a media file.")
 
     # Determine language parameter
     if language_choice == "custom":
@@ -399,7 +393,6 @@ def run_transcription(
         gr.DownloadButton(value=paths.get("word_srt"), interactive=True),
         gr.Code(value=default_code, language=default_lang),
         burn_ready_status,
-        gr.Button(interactive=True),  # open_folder_btn
         state_data,
     )
 
@@ -514,7 +507,7 @@ def run_burn_in(
             "*(For pixel hardcoding, install ffmpeg with libass: `brew install ffmpeg`)*."
         )
 
-    return output_video, status_msg, gr.Button(interactive=True)
+    return output_video, status_msg
 
 
 
@@ -522,7 +515,6 @@ def clear_all_inputs():
     """Reset all state and outputs to initial empty state."""
     return (
         None,  # input_video
-        "",  # local_video_input
         "",  # output_dir_input
         render_empty_state(),  # summary_output
         "",  # full_transcript_text
@@ -537,10 +529,8 @@ def clear_all_inputs():
         gr.DownloadButton(value=None, interactive=False),  # json_download
         gr.DownloadButton(value=None, interactive=False),  # wordsrt_download
         gr.Code(value="", language="markdown"),  # code_viewer
-        gr.Button(interactive=False),  # open_folder_btn
         None,  # burned_video_player
         "",  # burn_status_msg
-        gr.Button(interactive=False),  # open_burned_btn
         {},  # state_data
     )
 
@@ -743,19 +733,6 @@ def build_app():
                     label="Media Input (Upload Video or Audio)",
                     sources=["upload"],
                 )
-                with gr.Row():
-                    local_video_input = gr.Textbox(
-                        label="Or Local Video/Audio File Path",
-                        placeholder="e.g. /Users/name/Videos/clip.mp4",
-                        info="Direct path on this machine. Subtitles (.srt) will be saved directly into its folder.",
-                        lines=1,
-                        scale=4,
-                    )
-                    browse_video_btn = gr.Button(
-                        "📂 Browse...",
-                        size="sm",
-                        scale=1,
-                    )
 
                 clear_btn = gr.Button(
                     "🗑️ Clear All",
@@ -812,19 +789,12 @@ def build_app():
                             placeholder="e.g. AcmeCorp, GraphQL, Dr. Nguyen, TypeScript",
                             info="Guide Whisper on domain-specific proper nouns, jargon, or acronyms.",
                         )
-                        with gr.Row():
-                            output_dir_input = gr.Textbox(
-                                label="Save to Folder (Optional)",
-                                placeholder="Leave blank to only use in-browser downloads",
-                                info="Leave blank to prevent saving files to disk (download via buttons below).",
-                                lines=1,
-                                scale=4,
-                            )
-                            browse_out_btn = gr.Button(
-                                "📂 Browse...",
-                                size="sm",
-                                scale=1,
-                            )
+                        output_dir_input = gr.Textbox(
+                            label="Save to Folder (Optional)",
+                            placeholder="Leave blank to only use in-browser downloads",
+                            info="Leave blank to prevent saving files to disk (download via buttons below).",
+                            lines=1,
+                        )
 
                 transcribe_btn = gr.Button(
                     "✨ Transcribe Media",
@@ -872,21 +842,12 @@ def build_app():
                     with gr.Tab("💾 Subtitle Export & Inspector", id="tab_export"):
                         with gr.Group():
                             gr.Markdown("### 📦 Subtitle Download Center")
-                            with gr.Row():
-                                zip_download = gr.DownloadButton(
-                                    "📦 Download Subtitle Bundle (.ZIP)",
-                                    variant="primary",
-                                    size="lg",
-                                    scale=3,
-                                    interactive=False,
-                                )
-                                open_folder_btn = gr.Button(
-                                    "📂 Reveal in Finder",
-                                    variant="secondary",
-                                    size="lg",
-                                    scale=1,
-                                    interactive=False,
-                                )
+                            zip_download = gr.DownloadButton(
+                                "📦 Download Subtitle Bundle (.ZIP)",
+                                variant="primary",
+                                size="lg",
+                                interactive=False,
+                            )
                             with gr.Row():
                                 srt_download = gr.DownloadButton(
                                     "📝 SRT", size="sm", interactive=False
@@ -979,12 +940,6 @@ def build_app():
                             label="Subtitled Video Player",
                             interactive=False,
                         )
-                        open_burned_btn = gr.Button(
-                            "📂 Reveal Subtitled Video in Finder",
-                            variant="secondary",
-                            size="sm",
-                            interactive=False,
-                        )
 
         # Event: Toggle custom language textbox
         def on_language_change(lang_val):
@@ -997,67 +952,12 @@ def build_app():
         )
 
 
-        # Event: Browse for local video file
-        def on_browse_video(current_path):
-            picked = pick_local_file(prompt="Select Video or Audio File")
-            return picked if picked else current_path
-
-        browse_video_btn.click(
-            fn=on_browse_video,
-            inputs=[local_video_input],
-            outputs=[local_video_input],
-        )
-
-        # Event: Browse for custom output folder
-        def on_browse_output(current_path):
-            picked = pick_local_folder(prompt="Select Custom Output Folder")
-            return picked if picked else current_path
-
-        browse_out_btn.click(
-            fn=on_browse_output,
-            inputs=[output_dir_input],
-            outputs=[output_dir_input],
-        )
-
-        # Event: Reveal output folder in Finder
-        def on_reveal_folder(state):
-            if state and state.get("is_custom_save") and state.get("out_dir"):
-                reveal_in_file_manager(state["out_dir"])
-                gr.Info(f"Opening in Finder: {state['out_dir']}")
-            elif state and state.get("out_dir") and os.path.exists(state["out_dir"]):
-                reveal_in_file_manager(state["out_dir"])
-                gr.Info("Opening staging folder in Finder...")
-            else:
-                gr.Warning("No subtitle files generated yet.")
-
-        open_folder_btn.click(
-            fn=on_reveal_folder,
-            inputs=[state_data],
-            outputs=[],
-        )
-
-        # Event: Reveal burned video in Finder
-        def on_reveal_burned(state):
-            burned = state.get("burned_path") if state else None
-            if burned and os.path.exists(burned):
-                reveal_in_file_manager(burned)
-                gr.Info(f"Opening in Finder: {os.path.basename(burned)}")
-            else:
-                gr.Warning("No subtitled video generated yet.")
-
-        open_burned_btn.click(
-            fn=on_reveal_burned,
-            inputs=[state_data],
-            outputs=[],
-        )
-
         # Event: Clear all inputs & outputs
         clear_btn.click(
             fn=clear_all_inputs,
             inputs=[],
             outputs=[
                 input_video,
-                local_video_input,
                 output_dir_input,
                 summary_output,
                 full_transcript_box,
@@ -1070,10 +970,8 @@ def build_app():
                 json_download,
                 wordsrt_download,
                 code_viewer,
-                open_folder_btn,
                 burned_video_player,
                 burn_status_msg,
-                open_burned_btn,
                 state_data,
             ],
         )
@@ -1083,7 +981,6 @@ def build_app():
             fn=run_transcription,
             inputs=[
                 input_video,
-                local_video_input,
                 output_dir_input,
                 model_dropdown,
                 compute_dropdown,
@@ -1105,7 +1002,6 @@ def build_app():
                 wordsrt_download,
                 code_viewer,
                 burn_status_msg,
-                open_folder_btn,
                 state_data,
             ],
         )
@@ -1128,7 +1024,7 @@ def build_app():
                 font_family_dropdown,
                 burn_mode_radio,
             ],
-            outputs=[burned_video_player, burn_status_msg, open_burned_btn],
+            outputs=[burned_video_player, burn_status_msg],
         )
 
     return demo

@@ -141,8 +141,7 @@ def test_app_transcription_does_not_auto_save_to_video_directory():
 
         with patch("app.transcribe", return_value=(mock_segments, mock_info)):
             results = run_transcription(
-                video_path=None,
-                local_video_path=video_file,
+                video_path=video_file,
                 custom_output_dir=None,
                 model_size="medium",
                 compute_type="default",
@@ -166,9 +165,12 @@ def test_app_transcription_does_not_auto_save_to_video_directory():
         assert os.path.exists(os.path.join(staging_dir, "lesson1.srt")), "Files must exist in staging for download"
         assert os.path.exists(os.path.join(staging_dir, "lesson1_subtitles.zip"))
 
-        # Test clear_all_inputs matches expected outputs count (19 elements)
+        # Test run_transcription matches expected outputs count (13 elements)
+        assert len(results) == 13
+
+        # Test clear_all_inputs matches expected outputs count (16 elements)
         cleared = clear_all_inputs()
-        assert len(cleared) == 19
+        assert len(cleared) == 16
 
 
 def test_app_transcription_does_not_auto_save_to_downloads():
@@ -197,7 +199,6 @@ def test_app_transcription_does_not_auto_save_to_downloads():
         with patch("app.transcribe", return_value=(mock_segments, mock_info)):
             results = run_transcription(
                 video_path=video_file,
-                local_video_path=None,
                 custom_output_dir=None,
                 model_size="medium",
                 compute_type="default",
@@ -235,7 +236,6 @@ def test_app_transcription_custom_output_dir_respected():
         with patch("app.transcribe", return_value=(mock_segments, mock_info)):
             results = run_transcription(
                 video_path=video_file,
-                local_video_path=None,
                 custom_output_dir=custom_out,
                 model_size="medium",
                 compute_type="default",
