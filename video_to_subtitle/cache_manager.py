@@ -74,8 +74,8 @@ def get_temp_directories() -> List[str]:
         if os.path.exists(std_gradio_dir):
             dirs.append(std_gradio_dir)
 
-    # Subtitle exports, burn-in renders and whisper audio temp dirs
-    for pattern in ["subtitles_export_*", "subtitles_burn_*", "video_burn_*", "whisper_audio_*"]:
+    # Subtitle exports and whisper audio temp dirs
+    for pattern in ["subtitles_export_*", "whisper_audio_*"]:
         for p in glob.glob(os.path.join(temp_root, pattern)):
             if os.path.isdir(p):
                 dirs.append(p)

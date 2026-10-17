@@ -3,13 +3,11 @@
 import html
 import os
 import tempfile
-import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 import pandas as pd
 
-from video_to_subtitle.burn_in import burn_subtitles, supports_filter
 from video_to_subtitle.engine import (
     SegmentTiming,
     WordTiming,
@@ -17,12 +15,9 @@ from video_to_subtitle.engine import (
     transcribe,
 )
 from video_to_subtitle.formatters import (
-    export_all_formats,
+    export_srt,
     resolve_output_directory,
-    to_ass_karaoke,
-    to_json,
     to_srt,
-    to_vtt,
 )
 from video_to_subtitle.cache_manager import (
     clear_model_cache,
@@ -32,52 +27,6 @@ from video_to_subtitle.cache_manager import (
     register_exit_cleanup,
     register_session_temp_dir,
 )
-
-
-
-# Preset color & typography schemes for ASS Karaoke subtitles
-STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
-    "Classic Gold": {
-        "primary_color": "&H00FFFFFF",
-        "secondary_color": "&H0000E6FF",
-        "outline_color": "&H00000000",
-        "back_color": "&H80000000",
-        "bold": True,
-        "description": "Crisp white text with vibrant gold karaoke highlight",
-    },
-    "Cyber Neon": {
-        "primary_color": "&H00FFFF00",
-        "secondary_color": "&H00FF00FF",
-        "outline_color": "&H00101010",
-        "back_color": "&H80000000",
-        "bold": True,
-        "description": "Electric cyan text with vivid magenta highlight",
-    },
-    "Modern Emerald": {
-        "primary_color": "&H00FFFFFF",
-        "secondary_color": "&H004ADE80",
-        "outline_color": "&H001E293B",
-        "back_color": "&H80000000",
-        "bold": True,
-        "description": "Pure white text with fresh emerald green highlight",
-    },
-    "Warm Sunset": {
-        "primary_color": "&H00F8FAFC",
-        "secondary_color": "&H002080FF",
-        "outline_color": "&H00000000",
-        "back_color": "&H80000000",
-        "bold": True,
-        "description": "Soft ivory text with warm orange karaoke highlight",
-    },
-    "Minimalist Clean": {
-        "primary_color": "&H00FFFFFF",
-        "secondary_color": "&H00D4D4D8",
-        "outline_color": "&H00000000",
-        "back_color": "&H60000000",
-        "bold": False,
-        "description": "Clean white subtitle with subtle darkening box",
-    },
-}
 
 LANGUAGE_CHOICES = [
     ("🌐 Auto-detect Language", "auto"),
@@ -150,15 +99,6 @@ def get_downloaded_model_choices() -> List[Tuple[str, str]]:
     return choices
 
 
-def create_zip_bundle(file_paths: dict, zip_dest: str) -> str:
-    """Create a zip archive containing all generated subtitle formats."""
-    with zipfile.ZipFile(zip_dest, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for _, path in file_paths.items():
-            if os.path.exists(path):
-                zipf.write(path, arcname=os.path.basename(path))
-    return zip_dest
-
-
 def render_empty_state() -> str:
     """Render a clean onboarding empty state."""
     return """
@@ -168,7 +108,7 @@ def render_empty_state() -> str:
             Ready to Transcribe
         </h3>
         <p style="margin: 0.35rem 0 1.25rem 0; font-size: 0.88rem; color: var(--body-text-color-subdued, #64748b); max-width: 580px; margin-left: auto; margin-right: auto;">
-            Upload any video or audio file to transcribe with word-level precision, inspect timestamps, download formatted subtitles, or burn karaoke captions.
+            Upload any video or audio file to transcribe with word-level precision, inspect timestamps, and download SubRip (.srt) subtitles.
         </p>
         <div class="step-card-grid">
             <div class="step-card">
@@ -187,9 +127,9 @@ def render_empty_state() -> str:
             </div>
             <div class="step-card">
                 <span class="step-number">3</span>
-                <div style="font-weight: 600; font-size: 0.85rem; color: var(--body-text-color, #0f172a);">Export & Burn</div>
+                <div style="font-weight: 600; font-size: 0.85rem; color: var(--body-text-color, #0f172a);">Export Subtitles</div>
                 <div style="font-size: 0.76rem; color: var(--body-text-color-subdued, #64748b); margin-top: 0.2rem;">
-                    Export SRT, VTT, ASS, or burn animated karaoke captions directly.
+                    Download formatted SubRip (.srt) subtitles or inspect code directly.
                 </div>
             </div>
         </div>
@@ -305,7 +245,7 @@ def run_transcription(
     except Exception as e:
         raise gr.Error(f"Transcription failed: {str(e)}")
 
-    # Prepare export files
+    # Prepare export file
     # If custom_output_dir is explicitly specified, write to it; otherwise stage in an isolated
     # temporary directory strictly for in-browser downloads (never auto-writing to user's disk).
     base_name = os.path.splitext(os.path.basename(effective_video))[0]
@@ -318,27 +258,10 @@ def run_transcription(
         register_session_temp_dir(out_dir)
         is_custom_save = False
 
-    paths = export_all_formats(segments, info, out_dir, base_name)
+    srt_path = export_srt(segments, out_dir, base_name)
 
-    # Create zip bundle
-    zip_path = os.path.join(out_dir, f"{base_name}_subtitles.zip")
-    create_zip_bundle(paths, zip_path)
-
-    # Read formatted content for the live subtitle inspector
-    raw_texts = {}
-    format_map = {
-        "Standard SubRip (.srt)": (paths.get("srt"), "markdown"),
-        "WebVTT (.vtt)": (paths.get("vtt"), "markdown"),
-        "Karaoke SubStation (.ass)": (paths.get("ass"), "markdown"),
-        "Data (.json)": (paths.get("json"), "json"),
-        "Word-level SubRip (.word.srt)": (paths.get("word_srt"), "markdown"),
-    }
-    for fmt_name, (fpath, lang_type) in format_map.items():
-        if fpath and os.path.exists(fpath):
-            with open(fpath, "r", encoding="utf-8") as f:
-                raw_texts[fmt_name] = (f.read(), lang_type)
-        else:
-            raw_texts[fmt_name] = ("", lang_type)
+    with open(srt_path, "r", encoding="utf-8") as f:
+        srt_content = f.read()
 
     # Build segment dataframe and full reading text
     segment_rows = []
@@ -393,164 +316,25 @@ def run_transcription(
         info, len(segments), total_words, out_dir=(out_dir if is_custom_save else None)
     )
 
-    # Default code inspector view: Standard SRT
-    default_code, default_lang = raw_texts.get(
-        "Standard SubRip (.srt)", ("", "markdown")
-    )
-
     state_data = {
         "video_path": effective_video,
         "segments": [seg.to_dict() for seg in segments],
         "info": info,
-        "paths": paths,
-        "zip_path": zip_path,
-        "raw_texts": raw_texts,
+        "srt_path": srt_path,
         "out_dir": out_dir,
         "is_custom_save": is_custom_save,
         "base_name": base_name,
     }
-
-    if is_custom_save:
-        burn_ready_status = (
-            f"💡 **Subtitles saved to `{out_dir}`!** Select your desired karaoke style and font size below, "
-            "then click **Generate Subtitled Video**."
-        )
-    else:
-        burn_ready_status = (
-            "💡 **Subtitles ready!** You can download them below, inspect the formatted code, "
-            "or customize styling and click **Generate Subtitled Video**."
-        )
 
     return (
         metrics_html,
         full_transcript_text,
         segment_df,
         word_df,
-        gr.DownloadButton(value=zip_path, interactive=True),
-        gr.DownloadButton(value=paths.get("srt"), interactive=True),
-        gr.DownloadButton(value=paths.get("vtt"), interactive=True),
-        gr.DownloadButton(value=paths.get("ass"), interactive=True),
-        gr.DownloadButton(value=paths.get("json"), interactive=True),
-        gr.DownloadButton(value=paths.get("word_srt"), interactive=True),
-        gr.Code(value=default_code, language=default_lang),
-        burn_ready_status,
+        gr.DownloadButton(value=srt_path, interactive=True),
+        gr.Code(value=srt_content, language="markdown"),
         state_data,
     )
-
-
-def update_code_inspector(selected_format: str, state_data: Optional[dict]):
-    """Dynamically swap the code inspector view based on format selection."""
-    if not state_data or "raw_texts" not in state_data:
-        return gr.Code(value="No subtitles generated yet.", language="markdown")
-    raw_texts = state_data["raw_texts"]
-    if selected_format in raw_texts:
-        content, lang_type = raw_texts[selected_format]
-        return gr.Code(value=content, language=lang_type)
-    return gr.Code(value="", language="markdown")
-
-
-def run_burn_in(
-    video_path: Optional[str],
-    state_data: Optional[dict],
-    style_preset: str,
-    font_size: int,
-    font_family: str,
-    burn_mode: str,
-    progress=gr.Progress(track_tqdm=True),
-):
-    actual_video = (state_data.get("video_path") if state_data else None) or video_path
-    if not actual_video or not os.path.exists(actual_video):
-        raise gr.Error("Please upload or provide a valid video file first.")
-    if not state_data or "segments" not in state_data:
-        raise gr.Error("Please run transcription first before burning subtitles.")
-
-    progress(0.2, desc="Preparing custom subtitle style...")
-
-    # Reconstruct SegmentTiming objects
-    segments_data = state_data["segments"]
-    segments: List[SegmentTiming] = []
-    for s in segments_data:
-        words = [WordTiming(**w) for w in s.get("words", [])]
-        segments.append(
-            SegmentTiming(
-                id=s["id"],
-                start=s["start"],
-                end=s["end"],
-                text=s["text"],
-                words=words,
-            )
-        )
-
-    # Retrieve style parameters
-    preset = STYLE_PRESETS.get(style_preset, STYLE_PRESETS["Classic Gold"])
-    out_dir = (state_data.get("out_dir") if state_data else None) or tempfile.mkdtemp(
-        prefix="subtitles_burn_"
-    )
-    register_session_temp_dir(out_dir)
-    base_name = (state_data.get("base_name") if state_data else None) or os.path.splitext(os.path.basename(actual_video))[0]
-
-    # Generate custom ASS file
-    custom_ass_content = to_ass_karaoke(
-        segments=segments,
-        title=base_name,
-        font_name=font_family,
-        font_size=int(font_size),
-        primary_color=preset["primary_color"],
-        secondary_color=preset["secondary_color"],
-        outline_color=preset["outline_color"],
-        back_color=preset["back_color"],
-        bold=preset["bold"],
-    )
-
-    custom_ass_path = os.path.join(
-        out_dir, f"{base_name}_{style_preset.lower().replace(' ', '_')}.ass"
-    )
-    with open(custom_ass_path, "w", encoding="utf-8") as f:
-        f.write(custom_ass_content)
-
-    burned_output = os.path.join(
-        out_dir, f"{base_name}_subtitled.mp4"
-    )
-
-    # Translate burn mode selection
-    if burn_mode.startswith("Hardcode"):
-        prefer_mode = "hardcode"
-    elif burn_mode.startswith("Lossless"):
-        prefer_mode = "softcode"
-    else:
-        prefer_mode = "auto"
-
-    progress(0.5, desc="Rendering subtitles into video with ffmpeg...")
-
-    try:
-        output_video, mode_used = burn_subtitles(
-            actual_video,
-            custom_ass_path,
-            burned_output,
-            prefer_mode=prefer_mode,
-        )
-    except Exception as e:
-        raise gr.Error(f"Subtitle burn-in failed: {str(e)}")
-
-    progress(1.0, desc="Video rendering complete!")
-
-    if state_data is not None:
-        state_data["burned_path"] = output_video
-
-    if mode_used == "hardcode":
-        status_msg = (
-            "✅ **Subtitles hardcoded into video frames!** "
-            "Captions are permanently rendered onto the video pixels and will display on any player or social media platform."
-        )
-    else:
-        status_msg = (
-            "ℹ️ **Subtitles embedded as a lossless soft track (mov_text)!** "
-            "Zero video re-encoding loss. To toggle or view subtitles, enable the subtitle track in your media player (e.g. VLC, QuickTime). "
-            "*(For pixel hardcoding, install ffmpeg with libass: `brew install ffmpeg`)*."
-        )
-
-    return output_video, status_msg
-
 
 
 def clear_all_inputs():
@@ -564,15 +348,8 @@ def clear_all_inputs():
         pd.DataFrame(
             columns=["Start (s)", "End (s)", "Duration (s)", "Word", "Confidence"]
         ),  # word_df
-        gr.DownloadButton(value=None, interactive=False),  # zip_download
         gr.DownloadButton(value=None, interactive=False),  # srt_download
-        gr.DownloadButton(value=None, interactive=False),  # vtt_download
-        gr.DownloadButton(value=None, interactive=False),  # ass_download
-        gr.DownloadButton(value=None, interactive=False),  # json_download
-        gr.DownloadButton(value=None, interactive=False),  # wordsrt_download
         gr.Code(value="", language="markdown"),  # code_viewer
-        None,  # burned_video_player
-        "",  # burn_status_msg
         {},  # state_data
     )
 
@@ -725,14 +502,6 @@ def build_app():
         gap: 0.5rem;
         margin-top: 0.5rem;
     }
-
-    /* Download center header */
-    .download-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
-        gap: 0.5rem;
-        margin-top: 0.5rem;
-    }
     """
 
     theme = gr.themes.Soft(
@@ -758,8 +527,7 @@ def build_app():
                     <div class="pill-row">
                         <span class="feature-pill">🎯 Word-level Alignment</span>
                         <span class="feature-pill">🔒 100% Local & Private</span>
-                        <span class="feature-pill">📦 Multi-format (SRT, VTT, ASS, JSON)</span>
-                        <span class="feature-pill">🔥 Karaoke Burn-in</span>
+                        <span class="feature-pill">📝 SubRip (.SRT) Export</span>
                     </div>
                 </div>
             </div>
@@ -834,7 +602,7 @@ def build_app():
                         output_dir_input = gr.Textbox(
                             label="Save to Folder (Optional)",
                             placeholder="Leave blank to only use in-browser downloads",
-                            info="Leave blank to prevent saving files to disk (download via buttons below).",
+                            info="Leave blank to prevent saving files to disk (download via button below).",
                             lines=1,
                         )
 
@@ -900,103 +668,22 @@ def build_app():
 
                     with gr.Tab("💾 Subtitle Export & Inspector", id="tab_export"):
                         with gr.Group():
-                            gr.Markdown("### 📦 Subtitle Download Center")
-                            zip_download = gr.DownloadButton(
-                                "📦 Download Subtitle Bundle (.ZIP)",
+                            gr.Markdown("### 📦 Subtitle Download")
+                            srt_download = gr.DownloadButton(
+                                "📥 Download Subtitle (.SRT)",
                                 variant="primary",
                                 size="lg",
                                 interactive=False,
                             )
-                            with gr.Row():
-                                srt_download = gr.DownloadButton(
-                                    "📝 SRT", size="sm", interactive=False
-                                )
-                                vtt_download = gr.DownloadButton(
-                                    "🌐 WebVTT", size="sm", interactive=False
-                                )
-                                ass_download = gr.DownloadButton(
-                                    "🎵 Karaoke ASS", size="sm", interactive=False
-                                )
-                                json_download = gr.DownloadButton(
-                                    "📊 JSON Data", size="sm", interactive=False
-                                )
-                                wordsrt_download = gr.DownloadButton(
-                                    "⚡ Word SRT", size="sm", interactive=False
-                                )
 
                         gr.Markdown("---")
                         gr.Markdown("### 🔍 Live Subtitle Code Inspector")
-                        format_radio = gr.Radio(
-                            choices=[
-                                "Standard SubRip (.srt)",
-                                "WebVTT (.vtt)",
-                                "Karaoke SubStation (.ass)",
-                                "Data (.json)",
-                                "Word-level SubRip (.word.srt)",
-                            ],
-                            value="Standard SubRip (.srt)",
-                            label="Preview Subtitle Format",
-                        )
                         code_viewer = gr.Code(
                             value="// Run transcription to inspect generated subtitle code here.",
                             language="markdown",
-                            lines=14,
+                            lines=16,
                             show_line_numbers=True,
                             buttons=["copy"],
-                            interactive=False,
-                        )
-
-                    with gr.Tab("🎬 Subtitle Burn-In Studio", id="tab_burn"):
-                        with gr.Group():
-                            gr.Markdown("### 🎨 Customize Subtitle Styling & Burn-in")
-                            with gr.Row():
-                                style_preset_dropdown = gr.Dropdown(
-                                    choices=list(STYLE_PRESETS.keys()),
-                                    value="Classic Gold",
-                                    label="Karaoke Color Scheme",
-                                    info="Highlight animation color when spoken.",
-                                )
-                                font_family_dropdown = gr.Dropdown(
-                                    choices=[
-                                        "Arial",
-                                        "Helvetica",
-                                        "Trebuchet MS",
-                                        "Verdana",
-                                        "Times New Roman",
-                                        "Courier New",
-                                    ],
-                                    value="Arial",
-                                    label="Font Family",
-                                )
-                                font_size_slider = gr.Slider(
-                                    minimum=16,
-                                    maximum=48,
-                                    value=24,
-                                    step=2,
-                                    label="Font Size (pt)",
-                                )
-
-                            burn_mode_radio = gr.Radio(
-                                choices=[
-                                    "Auto-Detect (Hardcode if supported, else soft embed)",
-                                    "Hardcode (Burn into video pixels)",
-                                    "Lossless Soft Track (Fast container embed)",
-                                ],
-                                value="Auto-Detect (Hardcode if supported, else soft embed)",
-                                label="Subtitling Method",
-                            )
-
-                            burn_btn = gr.Button(
-                                "🔥 Generate Subtitled Video",
-                                variant="primary",
-                                size="lg",
-                            )
-
-                        burn_status_msg = gr.Markdown(
-                            value="💡 Upload a video and run transcription to enable subtitle burn-in."
-                        )
-                        burned_video_player = gr.Video(
-                            label="Subtitled Video Player",
                             interactive=False,
                         )
 
@@ -1010,7 +697,6 @@ def build_app():
             outputs=[custom_language_input],
         )
 
-
         # Event: Clear all inputs & outputs
         clear_btn.click(
             fn=clear_all_inputs,
@@ -1022,15 +708,8 @@ def build_app():
                 full_transcript_box,
                 segment_table,
                 word_table,
-                zip_download,
                 srt_download,
-                vtt_download,
-                ass_download,
-                json_download,
-                wordsrt_download,
                 code_viewer,
-                burned_video_player,
-                burn_status_msg,
                 state_data,
             ],
         )
@@ -1053,37 +732,10 @@ def build_app():
                 full_transcript_box,
                 segment_table,
                 word_table,
-                zip_download,
                 srt_download,
-                vtt_download,
-                ass_download,
-                json_download,
-                wordsrt_download,
                 code_viewer,
-                burn_status_msg,
                 state_data,
             ],
-        )
-
-        # Event: Format radio change in code inspector
-        format_radio.change(
-            fn=update_code_inspector,
-            inputs=[format_radio, state_data],
-            outputs=[code_viewer],
-        )
-
-        # Event: Run Burn-In
-        burn_btn.click(
-            fn=run_burn_in,
-            inputs=[
-                input_video,
-                state_data,
-                style_preset_dropdown,
-                font_size_slider,
-                font_family_dropdown,
-                burn_mode_radio,
-            ],
-            outputs=[burned_video_player, burn_status_msg],
         )
 
         # Event: Storage & Cache Handlers
@@ -1147,4 +799,3 @@ if __name__ == "__main__":
         theme=getattr(app, "launch_theme", None),
         css=getattr(app, "launch_css", None),
     )
-

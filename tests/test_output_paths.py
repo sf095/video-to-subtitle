@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from video_to_subtitle.engine import SegmentTiming, WordTiming
 from video_to_subtitle.formatters import (
     resolve_output_directory,
-    export_all_formats,
+    export_srt,
     to_srt,
 )
 
@@ -51,7 +51,7 @@ def test_resolve_output_directory_gradio_cache_fallback():
 
 
 def test_srt_file_written_to_video_directory():
-    """Test standard and word-level SRT files are created in video folder."""
+    """Test standard SRT file is created in video folder."""
     with tempfile.TemporaryDirectory() as temp_dir:
         video_folder = os.path.join(temp_dir, "my_movies")
         os.makedirs(video_folder, exist_ok=True)
@@ -66,15 +66,12 @@ def test_srt_file_written_to_video_directory():
         out_dir = resolve_output_directory(video_path)
         base_name = os.path.splitext(os.path.basename(video_path))[0]
 
-        paths = export_all_formats(segments, {}, out_dir, base_name)
+        srt_path = export_srt(segments, out_dir, base_name)
 
         srt_expected = os.path.join(video_folder, "presentation.srt")
-        word_srt_expected = os.path.join(video_folder, "presentation.word.srt")
 
         assert os.path.exists(srt_expected), f"Expected {srt_expected} to exist"
-        assert os.path.exists(word_srt_expected), f"Expected {word_srt_expected} to exist"
-        assert paths["srt"] == srt_expected
-        assert paths["word_srt"] == word_srt_expected
+        assert srt_path == srt_expected
 
         with open(srt_expected, "r", encoding="utf-8") as f:
             content = f.read()
@@ -105,7 +102,7 @@ def test_cli_outputs_to_video_directory(monkeypatch=None):
         ]
         mock_info = {"language": "en", "duration": 2.0}
 
-        test_args = ["video_to_subtitle.cli", video_file, "--format", "srt"]
+        test_args = ["video_to_subtitle.cli", video_file]
         with patch.object(sys, "argv", test_args):
             with patch("video_to_subtitle.cli.transcribe", return_value=(mock_segments, mock_info)):
                 main()
@@ -154,23 +151,20 @@ def test_app_transcription_does_not_auto_save_to_video_directory():
 
         # Video directory should NOT have been polluted with subtitles
         video_folder_srt = os.path.join(video_dir, "lesson1.srt")
-        video_folder_word_srt = os.path.join(video_dir, "lesson1.word.srt")
         assert not os.path.exists(video_folder_srt), "Expected NO srt file in video directory"
-        assert not os.path.exists(video_folder_word_srt), "Expected NO word.srt file in video directory"
 
         # Check state_data returned (last element of results)
         state_data = results[-1]
         assert state_data["is_custom_save"] is False
         staging_dir = state_data["out_dir"]
         assert os.path.exists(os.path.join(staging_dir, "lesson1.srt")), "Files must exist in staging for download"
-        assert os.path.exists(os.path.join(staging_dir, "lesson1_subtitles.zip"))
 
-        # Test run_transcription matches expected outputs count (13 elements)
-        assert len(results) == 13
+        # Test run_transcription matches expected outputs count (7 elements)
+        assert len(results) == 7
 
-        # Test clear_all_inputs matches expected outputs count (16 elements)
+        # Test clear_all_inputs matches expected outputs count (9 elements)
         cleared = clear_all_inputs()
-        assert len(cleared) == 16
+        assert len(cleared) == 9
 
 
 def test_app_transcription_does_not_auto_save_to_downloads():
@@ -252,7 +246,6 @@ def test_app_transcription_custom_output_dir_respected():
         assert os.path.exists(os.path.join(custom_out, "input.srt"))
 
 
-
 if __name__ == "__main__":
     test_resolve_output_directory_default()
     print("✓ test_resolve_output_directory_default passed.")
@@ -267,4 +260,3 @@ if __name__ == "__main__":
     test_app_transcription_custom_output_dir_respected()
     print("✓ test_app_transcription_custom_output_dir_respected passed.")
     print("All output path tests passed!")
-
