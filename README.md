@@ -3,6 +3,7 @@
 A modern, local, privacy-first application that transcribes videos to SubRip (`.srt`) subtitle files with **word-level timestamps** using **Whisper** (`faster-whisper` / CTranslate2).
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 ![Whisper](https://img.shields.io/badge/Whisper-Word--Level%20Timestamps-green.svg)
 ![Gradio](https://img.shields.io/badge/UI-Gradio-orange.svg)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)
@@ -27,6 +28,10 @@ A modern, local, privacy-first application that transcribes videos to SubRip (`.
 ### 1. Requirements
 Ensure you have `ffmpeg` installed on your system (used for extracting audio from video):
 ```bash
+# Windows (winget or chocolatey)
+winget install Gyan.FFmpeg
+# or: choco install ffmpeg
+
 # macOS
 brew install ffmpeg
 
@@ -36,6 +41,12 @@ sudo apt install ffmpeg
 
 ### 2. Setup Virtual Environment
 ```bash
+# Windows (PowerShell)
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+
+# macOS / Linux
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -43,6 +54,11 @@ pip install -r requirements.txt
 
 ### 3. Launch Web UI
 ```bash
+# Windows
+.venv\Scripts\activate
+python app.py
+
+# macOS / Linux
 source .venv/bin/activate
 python app.py
 ```
