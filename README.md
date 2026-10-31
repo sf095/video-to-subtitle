@@ -7,6 +7,8 @@ A modern, local, privacy-first application that transcribes videos to SubRip (`.
 ![Gradio](https://img.shields.io/badge/UI-Gradio-orange.svg)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)
 
+![Video-to-Subtitle Studio Interface](docs/assets/screenshot.jpg)
+
 ---
 
 ## 🌟 Key Features
@@ -93,7 +95,7 @@ video_to_subtitle/
 │   ├── platform_utils.py      # Platform utilities
 │   └── cli.py                 # Command-line interface
 ├── tests/                     # Unit and integration test suite
-└── docs/                      # Specifications and documentation
+└── docs/                      # Specifications, documentation & assets
 ```
 
 ---
